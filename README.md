@@ -71,7 +71,19 @@ Per-source options (all optional): `priority` (default when the mapping has no o
 
 Tokens must be unique and at least 16 characters; GitHub sources require a `secret`. Generate tokens with `openssl rand -hex 24`.
 
-Environment: `PUSHMORE_CONFIG` (default `/config/config.yaml`), `PORT` (8080), `LOG_LEVEL`, `FORWARDED_ALLOW_IPS` (set to your reverse proxy network so client IPs in logs are correct).
+Environment: `PUSHMORE_CONFIG` (default `/config/config.yaml`), `PUSHMORE_RELOAD_INTERVAL` (seconds, default `10`, `0` disables reload), `PORT` (8080), `LOG_LEVEL`, `FORWARDED_ALLOW_IPS` (set to your reverse proxy network so client IPs in logs are correct).
+
+### Reloading
+
+The config file is polled every `PUSHMORE_RELOAD_INTERVAL` seconds (mtime + content hash; polling works on GlusterFS/NFS where inotify does not). Edit the file and the new config is live within the interval, without restarting the container:
+
+```
+INFO pushmore: Config reloaded: 5 source(s), added=cross-seed changed=uptime-kuma
+```
+
+A new config is validated before it is applied. Invalid YAML or an invalid config (missing token, duplicate tokens, unset `${ENV}` …) is logged as an error and the running config stays in effect. Rate-limit state is kept for sources that still exist.
+
+Environment variables are read when the file is parsed, but the container's environment cannot change without a restart. Values from `${file:...}` (Docker secrets) are re-read on every reload.
 
 ## Running
 

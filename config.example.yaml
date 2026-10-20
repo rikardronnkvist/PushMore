@@ -1,5 +1,6 @@
 # PushMore configuration
 # Strings may use ${ENV_VAR} or ${file:/run/secrets/name} (Docker secrets).
+# The file is reloaded automatically when it changes (PUSHMORE_RELOAD_INTERVAL, default 10s).
 
 pushover:
   user_key: ${PUSHOVER_USER_KEY}

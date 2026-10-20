@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import hmac
 import json
@@ -19,10 +20,11 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from starlette.datastructures import UploadFile
 
 from . import __version__
-from .config import Config, Source, load_config
+from .config import Config, Source, config_path, load_config
 from .dispatcher import Dispatcher
 from .models import Attachment, Result
 from .pushover import PushoverClient
+from .reload import ConfigWatcher
 from .sources import apprise, generic, github, pushover, slack
 
 log = logging.getLogger("pushmore")
@@ -117,24 +119,79 @@ async def parse_fields(
     return data, files
 
 
-def create_app(config: Config | None = None, http_client: httpx.AsyncClient | None = None) -> FastAPI:
+def _source_changes(old: Config, new: Config) -> str:
+    added = sorted(set(new.sources) - set(old.sources))
+    removed = sorted(set(old.sources) - set(new.sources))
+    changed = sorted(
+        sid for sid in set(old.sources) & set(new.sources) if old.sources[sid] != new.sources[sid]
+    )
+    parts = [
+        f"{label}={','.join(ids)}"
+        for label, ids in (("added", added), ("removed", removed), ("changed", changed))
+        if ids
+    ]
+    return " ".join(parts) or "no source changes"
+
+
+def create_app(
+    config: Config | None = None,
+    http_client: httpx.AsyncClient | None = None,
+    config_file: str | os.PathLike[str] | None = None,
+    reload_interval: float | None = None,
+) -> FastAPI:
+    """Build the app.
+
+    Pass ``config`` for a fixed config (no reload), or let it be loaded from
+    ``config_file`` / ``$PUSHMORE_CONFIG``, in which case the file is polled for
+    changes every ``reload_interval`` seconds (``$PUSHMORE_RELOAD_INTERVAL``,
+    default 10, 0 disables).
+    """
+
     @contextlib.asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        cfg = config or load_config()
+        path = Path(config_file) if config_file else config_path()
+        cfg = config or load_config(path)
         client = http_client or httpx.AsyncClient(headers={"User-Agent": f"PushMore/{__version__}"})
+
+        def make_pushover(c: Config) -> PushoverClient:
+            return PushoverClient(c.pushover_api_url, c.pushover_user, c.pushover_token, client)
+
         app.state.config = cfg
-        app.state.dispatcher = Dispatcher(
-            cfg, PushoverClient(cfg.pushover_api_url, cfg.pushover_user, cfg.pushover_token, client)
-        )
+        app.state.dispatcher = Dispatcher(cfg, make_pushover(cfg))
         log.info(
             "PushMore %s started with %d source(s)%s",
             __version__,
             len(cfg.sources),
             " [dry-run]" if cfg.dry_run else "",
         )
+
+        def apply(new: Config) -> None:
+            old = app.state.config
+            app.state.dispatcher.reconfigure(new, make_pushover(new))
+            app.state.config = new
+            log.info(
+                "Config reloaded: %d source(s), %s%s",
+                len(new.sources),
+                _source_changes(old, new),
+                " [dry-run]" if new.dry_run else "",
+            )
+
+        interval = reload_interval
+        if interval is None:
+            interval = float(os.environ.get("PUSHMORE_RELOAD_INTERVAL", "10"))
+        task = None
+        if config is None and interval > 0:
+            watcher = ConfigWatcher(path, apply, interval)
+            watcher.prime()
+            app.state.watcher = watcher
+            task = asyncio.create_task(watcher.run())
         try:
             yield
         finally:
+            if task:
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
             if http_client is None:
                 await client.aclose()
 
