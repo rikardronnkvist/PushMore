@@ -1,0 +1,70 @@
+# PushMore configuration
+# Strings may use ${ENV_VAR} or ${file:/run/secrets/name} (Docker secrets).
+
+pushover:
+  user_key: ${PUSHOVER_USER_KEY}
+  app_token: ${PUSHOVER_APP_TOKEN}
+  # api_url: https://api.pushover.net/1/messages.json
+  # max_attachment_bytes: 2621440   # Pushover's limit for one image attachment
+
+server:
+  # max_body_bytes: 10485760
+  # dry_run: true                   # log what would be sent, never call Pushover
+
+# Logging goes to stdout (docker logs). LOG_LEVEL=DEBUG also logs received payloads
+# (truncated), which is handy when writing mappings.
+
+# Every source has a unique id (used in the URL) and its own token/secret.
+# Common optional keys for all sources:
+#   enabled, priority (default when the mapping has no opinion), sound, device,
+#   title_prefix, pushover_token / pushover_user (send as another Pushover app/user),
+#   min_priority, exclude: [regex, ...], dedup_seconds, rate_limit: "10/min"
+sources:
+
+  # POST /hooks/github/github-main  (Content type: application/json, Secret: same as below)
+  github-main:
+    type: github
+    secret: ${GITHUB_WEBHOOK_SECRET}
+    # events: [push, release, workflow_run, pull_request, issues, star, fork, dependabot_alert]
+    only_failures: false            # true = only failed workflow runs (+ dependabot alerts, releases, pushes)
+    rate_limit: 20/min
+
+  # Slack-compatible incoming webhook: Uptime Kuma, Grafana, *arr, Komodo, Semaphore ...
+  # URL: https://pushmore.example/hooks/slack/uptime-kuma?token=<token>
+  uptime-kuma:
+    type: slack
+    token: ${file:/run/secrets/pushmore_kuma_token}
+    title_prefix: "[Kuma]"
+    danger_priority: 1              # attachments with color "danger"/red get this priority
+    dedup_seconds: 300
+
+  # apprise-api compatible: apprise://pushmore.example/<token>  or  POST /notify/<token>
+  home-assistant:
+    type: apprise
+    token: ${file:/run/secrets/pushmore_ha_token}
+    type_priority: { info: -1, success: -1, warning: 0, failure: 1 }
+
+  # Apprise generic JSON plugin:
+  # json://pushmore.example/hooks/apprise-json/scripts?-token=<token>
+  scripts:
+    type: apprise_json
+    token: ${file:/run/secrets/pushmore_scripts_token}
+
+  # Any JSON webhook, rendered with sandboxed Jinja2 templates.
+  # URL: https://pushmore.example/hooks/generic/alertmanager  (Authorization: Bearer <token>)
+  alertmanager:
+    type: generic
+    token: ${file:/run/secrets/pushmore_am_token}
+    title_template: "{{ commonLabels.alertname | default('Alert') }} ({{ status }})"
+    message_template: |
+      {% for a in alerts %}{{ a.annotations.summary | default(a.labels.alertname) }}
+      {% endfor %}
+    url_template: "{{ externalURL }}"
+    priority_template: "{{ 1 if status == 'firing' else -1 }}"
+
+  # Drop-in replacement for api.pushover.net: point tools at
+  # https://pushmore.example/1/messages.json and give them this token as the app token.
+  legacy-tools:
+    type: pushover
+    token: ${file:/run/secrets/pushmore_legacy_token}
+    allow_user_override: false      # ignore the client's `user`, always use pushover.user_key
