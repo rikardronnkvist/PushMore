@@ -26,6 +26,7 @@ class ConfigWatcher:
         self.interval = interval
         self._stat: tuple[float, int] | None = None
         self._digest: str | None = None
+        self.last_error: str | None = None  # error of the last rejected reload, cleared on success
 
     def prime(self) -> None:
         """Record the state of the file that was loaded at startup."""
@@ -74,14 +75,17 @@ class ConfigWatcher:
         except ConfigError as exc:
             # Remember the digest so a broken file is reported once, not every poll.
             self._digest = digest
+            self.last_error = str(exc)
             log.error("Config reload failed, keeping current config: %s", exc)
             return None
-        except Exception:
+        except Exception as exc:
             self._digest = digest
+            self.last_error = f"{type(exc).__name__}: {exc}"
             log.exception("Config reload failed, keeping current config")
             return None
 
         self._digest = digest
+        self.last_error = None
         return config
 
     async def run(self) -> None:

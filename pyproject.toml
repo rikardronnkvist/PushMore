@@ -30,7 +30,7 @@ build-backend = "setuptools.build_meta"
 include = ["pushmore*"]
 
 [tool.setuptools.package-data]
-pushmore = ["static/*"]
+pushmore = ["static/*", "templates/*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

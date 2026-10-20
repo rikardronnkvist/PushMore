@@ -25,6 +25,7 @@ Pushover API clients ┘
 | `POST /hooks/apprise-json/<id>` | `apprise_json` | token¹ |
 | `POST /hooks/generic/<id>` | `generic` | token¹ |
 | `POST /1/messages.json` | `pushover` | `token` field |
+| `GET /` | – | none (keep internal) |
 | `GET /healthz` | – | none |
 
 ¹ `Authorization: Bearer <token>`, `X-PushMore-Token: <token>` or `?token=<token>`. Unknown sources and wrong tokens return the same `401`.
@@ -156,6 +157,10 @@ For tools that only speak the Pushover API. Point them at `https://pushmore.exam
 ```
 
 All normal message parameters are supported, including `attachment` and `attachment_base64`.
+
+## Config page
+
+`GET /` shows the running configuration: global settings, runtime settings and every source with its endpoint. Values not set in the file are shown with their default and marked `default`. Secrets are masked, and a failed reload is shown at the top. The page has no authentication, so only expose it internally.
 
 ## Logging and reload
 

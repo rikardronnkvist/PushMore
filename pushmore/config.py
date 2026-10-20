@@ -98,6 +98,9 @@ class Source:
     priority_template: str | None = None
     # Pushover-compatible endpoint
     allow_user_override: bool = False
+    # Keys set in the config file (the rest are defaults); not part of equality
+    explicit: frozenset[str] = field(default_factory=frozenset, compare=False, repr=False)
+    explicit_type_priority: frozenset[str] = field(default_factory=frozenset, compare=False, repr=False)
 
     def __post_init__(self) -> None:
         self._exclude_re = [re.compile(p, re.IGNORECASE | re.MULTILINE) for p in self.exclude]
@@ -115,6 +118,8 @@ class Config:
     max_body_bytes: int = 10 * 1024 * 1024
     dry_run: bool = False
     sources: dict[str, Source] = field(default_factory=dict)
+    # Dotted global keys set in the config file, e.g. "pushover.api_url"
+    explicit: frozenset[str] = field(default_factory=frozenset, compare=False, repr=False)
 
     def source(self, source_id: str, expected_type: str | set[str]) -> Source | None:
         src = self.sources.get(source_id)
@@ -134,14 +139,25 @@ def _build_source(source_id: str, raw: dict[str, Any]) -> Source:
     stype = raw.pop("type", None)
     if stype not in SOURCE_TYPES:
         raise ConfigError(f"Source '{source_id}': type must be one of {sorted(SOURCE_TYPES)}")
+    explicit = frozenset(raw)
     rate = RateLimit.parse(raw.pop("rate_limit", None))
     type_priority = dict(DEFAULT_APPRISE_PRIORITY)
-    type_priority.update(raw.pop("type_priority", None) or {})
-    known = set(Source.__dataclass_fields__) - {"id", "type", "rate_limit", "type_priority"}
+    given_tp = raw.pop("type_priority", None) or {}
+    type_priority.update(given_tp)
+    internal = {"id", "type", "rate_limit", "type_priority", "explicit", "explicit_type_priority"}
+    known = set(Source.__dataclass_fields__) - internal
     unknown = set(raw) - known
     if unknown:
         raise ConfigError(f"Source '{source_id}': unknown keys {sorted(unknown)}")
-    src = Source(id=source_id, type=stype, rate_limit=rate, type_priority=type_priority, **raw)
+    src = Source(
+        id=source_id,
+        type=stype,
+        rate_limit=rate,
+        type_priority=type_priority,
+        explicit=explicit,
+        explicit_type_priority=frozenset(given_tp),
+        **raw,
+    )
 
     if stype == "github":
         if not src.secret and not src.allow_unsigned:
@@ -196,4 +212,5 @@ def parse_config(raw: dict[str, Any]) -> Config:
         max_body_bytes=int(server.get("max_body_bytes", Config.max_body_bytes)),
         dry_run=bool(server.get("dry_run", False)),
         sources=sources,
+        explicit=frozenset([f"pushover.{k}" for k in po] + [f"server.{k}" for k in server]),
     )

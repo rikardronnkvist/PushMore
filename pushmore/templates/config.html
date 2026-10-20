@@ -1,0 +1,124 @@
+{% macro row(r) -%}
+<tr class="{{ 'default' if r.is_default }}">
+  <td class="k">{{ r.key }}</td>
+  <td class="v">{% if r.multiline %}<pre>{{ r.value }}</pre>{% else %}{{ r.value }}{% endif %}{% if r.is_default %}<span class="tag">default</span>{% endif %}</td>
+</tr>
+{%- endmacro %}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>PushMore</title>
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<style>
+  :root {
+    --bg: #f6f7fb; --card: #ffffff; --text: #1b1f2a; --muted: #6b7280; --line: #e5e7ef;
+    --accent: #2563eb; --accent-soft: #e8efff; --default: #9aa1ae; --warn-bg: #fff4e5; --warn: #9a4d00;
+    --err-bg: #fdecec; --err: #a11a1a; --code-bg: #f1f3f8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1218; --card: #171b24; --text: #e6e8ee; --muted: #9098a8; --line: #262c39;
+      --accent: #6b9bff; --accent-soft: #1c2740; --default: #6b7384; --warn-bg: #2e2412; --warn: #f2b45c;
+      --err-bg: #331818; --err: #ff8a8a; --code-bg: #10141c;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 980px; margin: 0 auto; padding: 24px 16px 48px; }
+  header { display: flex; align-items: center; gap: 14px; margin-bottom: 20px; }
+  header img { width: 44px; height: 44px; border-radius: 10px; }
+  h1 { font-size: 22px; margin: 0; }
+  .sub { color: var(--muted); font-size: 13px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted);
+       margin: 28px 0 10px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden;
+          margin-bottom: 14px; }
+  .card-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 12px; padding: 12px 16px;
+               border-bottom: 1px solid var(--line); }
+  .card-head h3 { margin: 0; font-size: 16px; }
+  .badge { font-size: 12px; padding: 1px 8px; border-radius: 999px; background: var(--accent-soft);
+           color: var(--accent); font-weight: 600; }
+  .badge.off { background: var(--err-bg); color: var(--err); }
+  .endpoint { font: 12.5px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted);
+              margin-left: auto; }
+  table { width: 100%; border-collapse: collapse; }
+  td { padding: 7px 16px; border-top: 1px solid var(--line); vertical-align: top; }
+  tr:first-child td { border-top: 0; }
+  td.k { width: 32%; font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted);
+         white-space: nowrap; }
+  td.v { font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-word; }
+  tr.default td.v { color: var(--default); }
+  .tag { font: 11px system-ui, sans-serif; text-transform: uppercase; letter-spacing: .05em;
+         border: 1px solid var(--line); color: var(--default); border-radius: 4px; padding: 0 5px;
+         margin-left: 8px; white-space: nowrap; }
+  pre { margin: 0; white-space: pre-wrap; background: var(--code-bg); padding: 6px 8px; border-radius: 6px; }
+  .banner { padding: 10px 14px; border-radius: 10px; margin-bottom: 14px; font-size: 14px; }
+  .banner.err { background: var(--err-bg); color: var(--err); }
+  .banner.warn { background: var(--warn-bg); color: var(--warn); }
+  .banner pre { background: transparent; padding: 4px 0 0; font-size: 12.5px; }
+  .legend { color: var(--muted); font-size: 13px; margin: -4px 0 12px; }
+  .empty { padding: 16px; color: var(--muted); }
+  @media (max-width: 640px) {
+    tr { display: block; border-top: 1px solid var(--line); padding: 6px 0; }
+    tr:first-child { border-top: 0; }
+    td { display: block; border: 0; padding: 0 16px; }
+    td.k { width: auto; white-space: normal; font-size: 12px; }
+    .endpoint { margin-left: 0; flex-basis: 100%; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <img src="/apple-touch-icon.png" alt="">
+    <div>
+      <h1>PushMore</h1>
+      <div class="sub">v{{ version }} · config loaded {{ loaded_at }} · page rendered {{ now }}</div>
+    </div>
+  </header>
+
+  {% if reload_error %}
+  <div class="banner err"><strong>Last config reload failed. The configuration below is still in effect.</strong>
+    <pre>{{ reload_error }}</pre></div>
+  {% endif %}
+  {% if dry_run %}
+  <div class="banner warn"><strong>Dry run:</strong> notifications are logged but not sent to Pushover.</div>
+  {% endif %}
+
+  <p class="legend">Values in grey marked <span class="tag">default</span> are not set in the config file. Secrets are masked.</p>
+
+  <h2>Global</h2>
+  <div class="card"><table>
+    {% for r in global_rows %}{{ row(r) }}{% endfor %}
+  </table></div>
+
+  <h2>Runtime</h2>
+  <div class="card"><table>
+    {% for r in runtime_rows %}{{ row(r) }}{% endfor %}
+  </table></div>
+
+  <h2>Sources ({{ sources|length }})</h2>
+  {% for s in sources %}
+  <div class="card">
+    <div class="card-head">
+      <h3>{{ s.id }}</h3>
+      <span class="badge">{{ s.type }}</span>
+      {% if not s.enabled %}<span class="badge off">disabled</span>{% endif %}
+      <span class="endpoint">{{ s.endpoint }}</span>
+    </div>
+    <table>
+      {% for r in s.rows %}{{ row(r) }}{% endfor %}
+    </table>
+  </div>
+  {% else %}
+  <div class="card"><div class="empty">No sources configured.</div></div>
+  {% endfor %}
+</main>
+</body>
+</html>
