@@ -24,6 +24,11 @@ class Throttle:
         self._seen: dict[str, float] = {}
         self._windows: dict[str, deque[float]] = defaultdict(deque)
 
+    def forget(self, keep: set[str]) -> None:
+        for source_id in list(self._windows):
+            if source_id not in keep:
+                del self._windows[source_id]
+
     def is_duplicate(self, source: Source, n: Notification, now: float) -> bool:
         if source.dedup_seconds <= 0:
             return False
@@ -54,6 +59,12 @@ class Dispatcher:
         self.config = config
         self.client = client
         self.throttle = Throttle()
+
+    def reconfigure(self, config: Config, client: PushoverClient) -> None:
+        """Swap config and client; keep throttle state for sources that still exist."""
+        self.config = config
+        self.client = client
+        self.throttle.forget(set(config.sources))
 
     def apply_source(self, source: Source, n: Notification) -> Notification:
         if n.priority is None:

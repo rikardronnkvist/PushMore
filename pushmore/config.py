@@ -153,12 +153,26 @@ def _build_source(source_id: str, raw: dict[str, Any]) -> Source:
     return src
 
 
+def config_path() -> Path:
+    return Path(os.environ.get("PUSHMORE_CONFIG", "/config/config.yaml"))
+
+
 def load_config(path: str | os.PathLike[str] | None = None) -> Config:
-    path = Path(path or os.environ.get("PUSHMORE_CONFIG", "/config/config.yaml"))
+    path = Path(path) if path else config_path()
     try:
-        raw = yaml.safe_load(path.read_text()) or {}
+        data = path.read_bytes()
     except OSError as exc:
         raise ConfigError(f"Cannot read config {path}: {exc}") from exc
+    return config_from_bytes(data)
+
+
+def config_from_bytes(data: bytes) -> Config:
+    try:
+        raw = yaml.safe_load(data) or {}
+    except yaml.YAMLError as exc:
+        raise ConfigError(f"Invalid YAML: {exc}") from exc
+    if not isinstance(raw, dict):
+        raise ConfigError("Config must be a YAML mapping")
     return parse_config(raw)
 
 
