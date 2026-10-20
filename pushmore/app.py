@@ -10,16 +10,17 @@ import logging
 import os
 import uuid
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qsl
 
 import httpx
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
 from starlette.datastructures import UploadFile
 
-from . import __version__
+from . import __version__, status
 from .config import Config, Source, config_path, load_config
 from .dispatcher import Dispatcher
 from .models import Attachment, Result
@@ -157,6 +158,8 @@ def create_app(
             return PushoverClient(c.pushover_api_url, c.pushover_user, c.pushover_token, client)
 
         app.state.config = cfg
+        app.state.config_loaded_at = datetime.now(UTC)
+        app.state.config_file = None if config else str(path)
         app.state.dispatcher = Dispatcher(cfg, make_pushover(cfg))
         log.info(
             "PushMore %s started with %d source(s)%s",
@@ -169,6 +172,7 @@ def create_app(
             old = app.state.config
             app.state.dispatcher.reconfigure(new, make_pushover(new))
             app.state.config = new
+            app.state.config_loaded_at = datetime.now(UTC)
             log.info(
                 "Config reloaded: %d source(s), %s%s",
                 len(new.sources),
@@ -180,6 +184,7 @@ def create_app(
         if interval is None:
             interval = float(os.environ.get("PUSHMORE_RELOAD_INTERVAL", "10"))
         task = None
+        app.state.reload_interval = interval if config is None else 0
         if config is None and interval > 0:
             watcher = ConfigWatcher(path, apply, interval)
             watcher.prime()
@@ -238,6 +243,28 @@ def create_app(
         return JSONResponse(
             {"status": "ok" if result.ok else "error", "result": result.status, "detail": result.detail},
             status_code=code,
+        )
+
+    # ---- config page ------------------------------------------------------
+    @app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
+    async def config_page(request: Request) -> HTMLResponse:
+        state = request.app.state
+        watcher = getattr(state, "watcher", None)
+        page = status.render(
+            state.config,
+            loaded_at=state.config_loaded_at,
+            config_file=state.config_file,
+            reload_interval=state.reload_interval,
+            reload_error=watcher.last_error if watcher else None,
+        )
+        return HTMLResponse(
+            page,
+            headers={
+                "Cache-Control": "no-store",
+                "X-Robots-Tag": "noindex",
+                "Content-Security-Policy": "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'",
+                "X-Frame-Options": "DENY",
+            },
         )
 
     # ---- meta -------------------------------------------------------------
