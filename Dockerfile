@@ -21,11 +21,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 RUN --mount=type=bind,from=build,source=/wheels,target=/wheels \
     pip install --no-cache-dir /wheels/*.whl \
- && useradd --system --uid 10001 --home-dir /data pushmore \
- && mkdir -p /data /config && chown pushmore /data
+ && useradd --system --uid 10001 --no-create-home pushmore \
+ && mkdir -p /config
 
 USER 10001
-VOLUME ["/data"]
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
   CMD python -c "import os,urllib.request; urllib.request.urlopen(f'http://127.0.0.1:{os.environ.get(\"PORT\",\"8080\")}/healthz', timeout=4)" || exit 1

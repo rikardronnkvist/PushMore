@@ -2,6 +2,7 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 
 import httpx
 
@@ -29,10 +30,21 @@ def test_healthz(client):
     assert client.get("/healthz").json()["status"] == "ok"
 
 
-def test_events_requires_admin(client):
-    assert client.get("/api/events").status_code == 401
-    r = client.get("/api/events", headers={"Authorization": f"Bearer {TOKENS['admin']}"})
-    assert r.status_code == 200
+def test_favicons(client):
+    for path, ctype in [
+        ("/favicon.ico", "image/x-icon"),
+        ("/favicon-32x32.png", "image/png"),
+        ("/apple-touch-icon.png", "image/png"),
+        ("/icons/android-chrome-512x512.png", "image/png"),
+        ("/icon.png", "image/png"),
+        ("/site.webmanifest", "application/manifest+json"),
+    ]:
+        r = client.get(path)
+        assert r.status_code == 200, path
+        assert r.headers["content-type"].startswith(ctype), path
+        assert len(r.content) > 100
+    assert client.get("/site.webmanifest").json()["name"] == "PushMore"
+    assert client.get("/icons/../app.py").status_code == 404
 
 
 def test_wrong_token_and_unknown_source_look_identical(client, pushover_mock):
@@ -379,8 +391,6 @@ def test_rate_limit(pushover_mock):
         for i in range(4):
             c.post(f"/hooks/slack/kuma?token={TOKENS['slack']}", json={"text": f"msg {i}"})
         assert pushover_mock.call_count == 2
-        events = c.get("/api/events", headers={"X-PushMore-Token": TOKENS["admin"]}).json()
-        assert [e["status"] for e in events][:2] == ["ratelimited", "ratelimited"]
 
 
 def test_exclude_and_min_priority(pushover_mock):
@@ -413,10 +423,8 @@ def test_dry_run(pushover_mock):
         assert not pushover_mock.called
 
 
-def test_event_log_redacts_tokens(client, pushover_mock):
+def test_logs_go_to_stdout_without_secrets(client, pushover_mock, caplog):
+    caplog.set_level(logging.DEBUG, logger="pushmore")
     client.post("/1/messages.json", data={"token": TOKENS["pushover"], "user": "secret-user", "message": "m"})
-    events = client.get(
-        "/api/events?payload=true", headers={"Authorization": f"Bearer {TOKENS['admin']}"}
-    ).json()
-    dumped = json.dumps(events)
-    assert TOKENS["pushover"] not in dumped and "secret-user" not in dumped
+    assert "source=legacy endpoint=pushover status=sent" in caplog.text
+    assert TOKENS["pushover"] not in caplog.text and "secret-user" not in caplog.text

@@ -10,7 +10,7 @@ PushMore is a small self-hosted gateway that receives notifications in the forma
 GitHub webhooks ─────┐
 Slack-style hooks ───┤
 Apprise (API/json) ──┼──► PushMore ──► Pushover API ──► 📱
-Generic JSON ────────┤   filter · dedup · rate limit · log
+Generic JSON ────────┤   filter · dedup · rate limit
 Pushover API clients ┘
 ```
 
@@ -25,8 +25,8 @@ Pushover API clients ┘
 | `POST /notify` | `apprise` | token¹ | Stateless apprise-api calls (`urls` is ignored) |
 | `POST /hooks/apprise-json/<id>` | `apprise_json` | token¹ | Apprise `json://` plugin |
 | `POST /hooks/generic/<id>` | `generic` | token¹ | Any JSON webhook + Jinja2 templates |
-| `GET /api/events` | – | `admin_token`¹ | Event log (`?limit=50&source=x&payload=true`) |
 | `GET /healthz` | – | none | Health checks |
+| `GET /favicon.ico`, `/icon.png` … | – | none | Icons for dashboards and other services (see below) |
 
 ¹ `Authorization: Bearer <token>`, `X-PushMore-Token: <token>` or `?token=<token>`. Unknown sources and wrong tokens return the same `401`.
 
@@ -37,6 +37,31 @@ Pushover API clients ┘
 - **Apprise**: `type` → priority via `type_priority` (default `failure` = 1). `format: markdown|html` is converted to Pushover HTML. The first image attachment that fits is forwarded (multipart for apprise-api, base64 for `json://`); remote attachment URLs are never fetched.
 - **Generic**: `title_template`, `message_template`, `url_template`, `priority_template` (sandboxed Jinja2, payload keys available directly and as `payload`). Without templates PushMore uses `message`/`text`/`body` and `title`.
 - **Pushover**: All normal message parameters, including `attachment` (multipart) and `attachment_base64`. The client's `user` is ignored unless `allow_user_override: true`.
+
+### Icons
+
+PushMore serves its own icons so other services (dashboards, Pushover app icon, Home Assistant, Homepage …) can link to them:
+
+| Path | Size |
+|---|---|
+| `/favicon.ico` | 16/32/48 multi-size |
+| `/favicon-16x16.png`, `/favicon-32x32.png` | 16, 32 |
+| `/apple-touch-icon.png` | 180 |
+| `/android-chrome-192x192.png`, `/android-chrome-512x512.png` | 192, 512 |
+| `/icon.png` | 512 (alias) |
+| `/site.webmanifest` | Web app manifest |
+
+PNG files are also available under `/icons/<name>`.
+
+## Logging
+
+Everything is logged to stdout, so it ends up in `docker logs` / `docker service logs`. There is no database and no log API. Each request produces one line:
+
+```
+INFO pushmore.dispatcher: source=uptime-kuma endpoint=slack status=sent title='[Kuma] nas01 down'
+```
+
+`status` is one of `sent`, `ignored`, `filtered`, `deduped`, `ratelimited`, `dry_run` or `error` (logged as WARNING). With `LOG_LEVEL=DEBUG` the received payload is logged too (truncated to 4 KB, Pushover credentials removed), which is useful when writing mappings.
 
 ## Configuration
 
@@ -52,7 +77,7 @@ Environment: `PUSHMORE_CONFIG` (default `/config/config.yaml`), `PORT` (8080), `
 
 ```bash
 docker run -d --name pushmore -p 8080:8080 \
-  -v ./config.yaml:/config/config.yaml:ro -v pushmore-data:/data \
+  -v ./config.yaml:/config/config.yaml:ro \
   -e PUSHOVER_USER_KEY=... -e PUSHOVER_APP_TOKEN=... \
   ghcr.io/rikardronnkvist/pushmore:latest
 ```
@@ -69,9 +94,7 @@ services:
       - source: pushmore_config
         target: /config/config.yaml
     # reference these in config.yaml as ${file:/run/secrets/<name>}
-    secrets: [pushover_user_key, pushover_app_token, pushmore_admin_token]
-    volumes:
-      - pushmore-data:/data
+    secrets: [pushover_user_key, pushover_app_token, pushmore_kuma_token]
     networks: [traefik]
     deploy:
       replicas: 1   # dedup and rate limiting are in-memory

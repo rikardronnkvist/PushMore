@@ -113,10 +113,6 @@ class Config:
     pushover_api_url: str = "https://api.pushover.net/1/messages.json"
     max_attachment_bytes: int = 2_621_440  # 2.5 MiB
     max_body_bytes: int = 10 * 1024 * 1024
-    db_path: str = "/data/pushmore.db"
-    retention_days: int = 14
-    store_payloads: bool = True
-    admin_token: str | None = None
     dry_run: bool = False
     sources: dict[str, Source] = field(default_factory=dict)
 
@@ -171,7 +167,6 @@ def parse_config(raw: dict[str, Any]) -> Config:
     po = raw.get("pushover") or {}
     if not po.get("user_key") or not po.get("app_token"):
         raise ConfigError("pushover.user_key and pushover.app_token are required")
-    log = raw.get("log") or {}
     server = raw.get("server") or {}
     sources = {sid: _build_source(sid, s) for sid, s in (raw.get("sources") or {}).items()}
 
@@ -185,10 +180,6 @@ def parse_config(raw: dict[str, Any]) -> Config:
         pushover_api_url=po.get("api_url", Config.pushover_api_url),
         max_attachment_bytes=int(po.get("max_attachment_bytes", Config.max_attachment_bytes)),
         max_body_bytes=int(server.get("max_body_bytes", Config.max_body_bytes)),
-        db_path=log.get("db_path", Config.db_path),
-        retention_days=int(log.get("retention_days", Config.retention_days)),
-        store_payloads=bool(log.get("store_payloads", True)),
-        admin_token=server.get("admin_token"),
         dry_run=bool(server.get("dry_run", False)),
         sources=sources,
     )

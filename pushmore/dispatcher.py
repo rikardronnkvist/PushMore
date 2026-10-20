@@ -1,4 +1,4 @@
-"""Shared pipeline: per-source overrides → filter → dedup → rate limit → send → log."""
+"""Shared pipeline: per-source overrides → filter → dedup → rate limit → send → log to stdout."""
 
 from __future__ import annotations
 
@@ -10,10 +10,11 @@ from collections import defaultdict, deque
 from .config import Config, Source
 from .models import Notification, Result
 from .pushover import PushoverClient, PushoverError
-from .store import EventStore
 from .text import html_to_text
 
 log = logging.getLogger(__name__)
+
+PAYLOAD_LOG_MAX = 4096
 
 
 class Throttle:
@@ -49,10 +50,9 @@ class Throttle:
 
 
 class Dispatcher:
-    def __init__(self, config: Config, client: PushoverClient, store: EventStore):
+    def __init__(self, config: Config, client: PushoverClient):
         self.config = config
         self.client = client
-        self.store = store
         self.throttle = Throttle()
 
     def apply_source(self, source: Source, n: Notification) -> Notification:
@@ -102,25 +102,23 @@ class Dispatcher:
                 request_id = await self.client.send(n)
                 result = Result("sent", request_id=request_id)
             except PushoverError as exc:
-                log.warning("source=%s %s", source.id, exc)
                 result = Result("error", str(exc))
 
         self._log(source, endpoint, result, n, payload)
         return result
 
-    def _log(self, source: Source, endpoint: str, result: Result, n: Notification | None, payload) -> None:
-        log.info(
-            "source=%s endpoint=%s status=%s %s", source.id, endpoint, result.status, result.detail or ""
+    def _log(
+        self, source: Source, endpoint: str, result: Result, n: Notification | None, payload: bytes | None
+    ) -> None:
+        level = logging.WARNING if result.status == "error" else logging.INFO
+        log.log(
+            level,
+            "source=%s endpoint=%s status=%s title=%r%s",
+            source.id,
+            endpoint,
+            result.status,
+            n.title if n else None,
+            f" detail={result.detail}" if result.detail else "",
         )
-        try:
-            self.store.add(
-                endpoint=endpoint,
-                status=result.status,
-                source=source.id,
-                title=n.title if n else None,
-                message=n.message if n else None,
-                detail=result.detail or result.request_id,
-                payload=payload,
-            )
-        except Exception:  # logging must never break delivery
-            log.exception("Failed to write event log")
+        if payload and log.isEnabledFor(logging.DEBUG):
+            log.debug("source=%s payload=%s", source.id, payload[:PAYLOAD_LOG_MAX].decode("utf-8", "replace"))

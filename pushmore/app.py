@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import hmac
 import json
@@ -10,12 +9,13 @@ import logging
 import os
 import uuid
 from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qsl
 
 import httpx
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from starlette.datastructures import UploadFile
 
 from . import __version__
@@ -24,9 +24,29 @@ from .dispatcher import Dispatcher
 from .models import Attachment, Result
 from .pushover import PushoverClient
 from .sources import apprise, generic, github, pushover, slack
-from .store import EventStore
 
 log = logging.getLogger("pushmore")
+
+
+STATIC_DIR = Path(__file__).parent / "static"
+STATIC_FILES = {
+    "favicon.ico": "image/x-icon",
+    "favicon-16x16.png": "image/png",
+    "favicon-32x32.png": "image/png",
+    "apple-touch-icon.png": "image/png",
+    "android-chrome-192x192.png": "image/png",
+    "android-chrome-512x512.png": "image/png",
+    "site.webmanifest": "application/manifest+json",
+}
+
+
+def _static_route(name: str, media_type: str):
+    path = STATIC_DIR / name
+
+    async def serve() -> FileResponse:
+        return FileResponse(path, media_type=media_type, headers={"Cache-Control": "public, max-age=86400"})
+
+    return serve
 
 
 class BodyTooLarge(Exception):
@@ -102,11 +122,9 @@ def create_app(config: Config | None = None, http_client: httpx.AsyncClient | No
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         cfg = config or load_config()
         client = http_client or httpx.AsyncClient(headers={"User-Agent": f"PushMore/{__version__}"})
-        store = EventStore(cfg.db_path, cfg.store_payloads)
         app.state.config = cfg
-        app.state.store = store
         app.state.dispatcher = Dispatcher(
-            cfg, PushoverClient(cfg.pushover_api_url, cfg.pushover_user, cfg.pushover_token, client), store
+            cfg, PushoverClient(cfg.pushover_api_url, cfg.pushover_user, cfg.pushover_token, client)
         )
         log.info(
             "PushMore %s started with %d source(s)%s",
@@ -114,21 +132,11 @@ def create_app(config: Config | None = None, http_client: httpx.AsyncClient | No
             len(cfg.sources),
             " [dry-run]" if cfg.dry_run else "",
         )
-
-        async def pruner() -> None:
-            while True:
-                with contextlib.suppress(Exception):
-                    store.prune(cfg.retention_days)
-                await asyncio.sleep(3600)
-
-        task = asyncio.create_task(pruner())
         try:
             yield
         finally:
-            task.cancel()
             if http_client is None:
                 await client.aclose()
-            store.close()
 
     app = FastAPI(
         title="PushMore",
@@ -180,13 +188,24 @@ def create_app(config: Config | None = None, http_client: httpx.AsyncClient | No
     async def healthz() -> dict[str, str]:
         return {"status": "ok", "version": __version__}
 
-    @app.get("/api/events")
-    async def events(
-        request: Request, limit: int = 50, source: str | None = None, payload: bool = False
-    ) -> list[dict[str, Any]]:
-        if not _eq(request_token(request), cfg(request).admin_token):
-            raise Unauthorized
-        return request.app.state.store.recent(limit, source, payload)
+    # ---- icons ------------------------------------------------------------
+    for name, media_type in STATIC_FILES.items():
+        app.add_api_route(
+            f"/{name}", _static_route(name, media_type), methods=["GET", "HEAD"], include_in_schema=False
+        )
+        if name.endswith(".png"):
+            app.add_api_route(
+                f"/icons/{name}",
+                _static_route(name, media_type),
+                methods=["GET", "HEAD"],
+                include_in_schema=False,
+            )
+    app.add_api_route(
+        "/icon.png",
+        _static_route("android-chrome-512x512.png", "image/png"),
+        methods=["GET", "HEAD"],
+        include_in_schema=False,
+    )
 
     # ---- Pushover compatible ----------------------------------------------
     @app.post("/1/messages.json")

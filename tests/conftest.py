@@ -14,7 +14,6 @@ TOKENS = {
     "apprise": "apprise-key-0123456789",
     "apprise_json": "apprise-json-0123456789",
     "pushover": "pushover-local-0123456789",
-    "admin": "admin-token-0123456789",
 }
 GITHUB_SECRET = "gh-secret"
 
@@ -40,8 +39,6 @@ def base_config(**source_overrides):
     return parse_config(
         {
             "pushover": {"user_key": "u-real", "app_token": "a-real"},
-            "log": {"db_path": ":memory:"},
-            "server": {"admin_token": TOKENS["admin"]},
             "sources": sources,
         }
     )
